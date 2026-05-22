@@ -4,7 +4,6 @@ import re
 import os
 import shutil
 import time
-import hashlib
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor
 
@@ -91,25 +90,16 @@ class SessionManager:
 
 class WasteDispoMaster:
     ENV_CACHE_TTL_SECONDS = 60 * 60  # 1 hour
-    RESEARCH_CACHE_TTL_SECONDS = 30 * 60  # 30 minutes
-    VISION_CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 
     def __init__(self, model_name="gemma4:31b-cloud", lite_model=None, default_location="Chittarikkal, Kerala, India"):
         # Hard-lock to a single model across the entire system.
         locked_model = "gemma4:31b-cloud"
         self.model_name = locked_model
         self.lite_model = self.model_name  # kept only for backward compatibility; never used as a different model
+        self.max_tokens = 16000  # Increased token limit for better responses
         self.session = SessionManager()
         self.system_name = os.getenv("SUSTAINAI_SYSTEM_NAME", "SustainAi")
         self.master_name = os.getenv("SUSTAINAI_MASTER_NAME", "Lily")
-
-        # Performance / behavior switches
-        self.fast_mode = self._env_flag("SUSTAINAI_FAST_MODE", default=False)
-        self.explain_plots_mode = (os.getenv("SUSTAINAI_EXPLAIN_PLOTS", "auto") or "auto").strip().lower()
-        self.max_plot_analyses = self._env_int("SUSTAINAI_MAX_PLOT_ANALYSES", default=2, minimum=0, maximum=12)
-        self.always_full_bundle = self._env_flag("SUSTAINAI_ALWAYS_FULL_BUNDLE", default=False)
-        self.enable_perf_logs = self._env_flag("SUSTAINAI_PERF_LOGS", default=True)
-        self.vision_workers = self._env_int("SUSTAINAI_VISION_WORKERS", default=(2 if self.fast_mode else 4), minimum=1, maximum=8)
 
         # Initialize context from saved session or defaults
         saved_data = self.session.load()
@@ -129,47 +119,6 @@ class WasteDispoMaster:
             "classifier_agent": {"module": None, "description": "Classifies waste (Under Construction)", "type": "TEXT"},
             "dashboard_agent": {"module": DashboardAgentWrapper(), "description": "Generates a comprehensive Intelligence Command Center.", "type": "FILE"}
         }
-
-    def _env_flag(self, name: str, default: bool = False) -> bool:
-        raw = os.getenv(name)
-        if raw is None:
-            return default
-        v = str(raw).strip().lower()
-        if v in ("1", "true", "yes", "y", "on"):
-            return True
-        if v in ("0", "false", "no", "n", "off"):
-            return False
-        return default
-
-    def _env_int(self, name: str, default: int, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
-        raw = os.getenv(name)
-        try:
-            val = int(str(raw).strip()) if raw is not None else int(default)
-        except Exception:
-            val = int(default)
-        if minimum is not None:
-            val = max(minimum, val)
-        if maximum is not None:
-            val = min(maximum, val)
-        return val
-
-    def _perf(self, label: str):
-        """Tiny perf logger context manager."""
-        class _PerfCtx:
-            def __init__(self, outer, lbl):
-                self.outer = outer
-                self.lbl = lbl
-                self.t0 = None
-            def __enter__(self):
-                self.t0 = time.perf_counter()
-                return self
-            def __exit__(self, exc_type, exc, tb):
-                if not self.outer.enable_perf_logs:
-                    return False
-                dt = (time.perf_counter() - (self.t0 or time.perf_counter()))
-                print(f"⏱️  {self.lbl}: {dt:.2f}s")
-                return False
-        return _PerfCtx(self, label)
 
     def _get_system_prompt(self):
         agent_desc = "\n".join([f"- {name}: {info['description']}" for name, info in self.agents.items()])
@@ -197,59 +146,6 @@ class WasteDispoMaster:
     def _get_cache(self) -> Dict:
         kb = self.context.setdefault("knowledge_base", {})
         return kb.setdefault("_cache", {})
-
-    def _hash_file(self, path: str) -> Optional[str]:
-        if not path or not os.path.exists(path):
-            return None
-        h = hashlib.sha256()
-        try:
-            with open(path, "rb") as f:
-                for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                    h.update(chunk)
-            return h.hexdigest()
-        except Exception:
-            return None
-
-    def _cache_get_ttl(self, cache_key: str, ttl_seconds: int):
-        cache = self._get_cache()
-        item = cache.get(cache_key)
-        if not isinstance(item, dict):
-            return None
-        fetched_at = item.get("fetched_at")
-        if not isinstance(fetched_at, int):
-            return None
-        if self._now() - fetched_at > ttl_seconds:
-            return None
-        return item.get("value")
-
-    def _cache_set_ttl(self, cache_key: str, value, ttl_seconds: int):
-        cache = self._get_cache()
-        cache[cache_key] = {
-            "fetched_at": self._now(),
-            "ttl_seconds": ttl_seconds,
-            "value": value,
-        }
-
-    def _run_research_cached(self, query: str) -> Dict:
-        if not query:
-            return {"success": False, "error": "No query provided."}
-        key = f"research::{(query or '').strip().lower()}"
-        cached = self._cache_get_ttl(key, self.RESEARCH_CACHE_TTL_SECONDS)
-        if isinstance(cached, dict):
-            return {**cached, "cached": True}
-        res = self.agents["search_agent"]["module"].run({"query": query})
-        if isinstance(res, dict) and res.get("success"):
-            self._cache_set_ttl(key, res, self.RESEARCH_CACHE_TTL_SECONDS)
-        return res
-
-    def _should_explain_plots_mode(self, user_text: str) -> bool:
-        mode = (self.explain_plots_mode or "auto").strip().lower()
-        if mode == "never":
-            return False
-        if mode == "always":
-            return True
-        # auto
-        return self._is_full_report_request(user_text) or self._should_explain_plots(user_text)
 
     def _get_cached_env(self, place: str):
         cache = self._get_cache()
@@ -341,32 +237,12 @@ class WasteDispoMaster:
             {"intent": "dashboard_agent", "parameters": {}},
         ]
 
-    def _build_slim_bundle(self, user_text: str) -> List[Dict]:
-        """Fast default bundle: env + dashboard. Adds research only if explicitly asked."""
-        place = self.context.get("location") or "Unknown"
-        base = [
-            {"intent": "env_agent", "parameters": {"place": place}},
-            {"intent": "dashboard_agent", "parameters": {}},
-        ]
-        if not user_text:
-            return base
-        t = user_text.lower()
-        if any(k in t for k in ["research", "news", "latest", "update", "sources", "web"]):
-            query = f"Waste management, pollution, and sustainability updates for {place}. User request: {user_text}".strip()
-            return [
-                {"intent": "env_agent", "parameters": {"place": place}},
-                {"intent": "search_agent", "parameters": {"query": query}},
-                {"intent": "dashboard_agent", "parameters": {}},
-            ]
-        return base
-
     def _auto_actions_from_text(self, user_text: str) -> List[Dict]:
         if not user_text:
             return []
         text = user_text.lower()
         if self._is_full_report_request(text):
-            # Full reports use the dedicated pipeline (faster + deterministic), so don't route through actions.
-            return []
+            return self._build_full_bundle(user_text)
 
         env_keywords = [
             "environment",
@@ -382,9 +258,7 @@ class WasteDispoMaster:
             "recycling",
         ]
         if any(k in text for k in env_keywords):
-            if self.always_full_bundle and not self.fast_mode:
-                return self._build_full_bundle(user_text)
-            return self._build_slim_bundle(user_text)
+            return self._build_full_bundle(user_text)
         return []
 
     def _capture_suggested_actions(self, ai_text: str) -> List[Dict]:
@@ -413,103 +287,61 @@ class WasteDispoMaster:
         t = text.lower()
         return any(k in t for k in ["explain image", "analyze image", "analyse image", "image analysis", "demo image", "3480.webp", "3480"]) 
 
-    def _add_plot_explanation(self, image_path: str, prompt: str) -> Optional[Dict[str, object]]:
-        if not image_path:
-            return None
-
-        existing = self.context.setdefault("knowledge_base", {}).setdefault("plot_explanations", [])
-        for item in existing:
-            if item.get("file_path") == image_path:
-                return {"text": item.get("explanation"), "is_new": False}
-
-        explanation = self.agents["vision_agent"]["module"].run({
-            "image_path": image_path,
-            "prompt": prompt,
-        })
-        existing.append({"file_path": image_path, "explanation": explanation})
-        return {"text": explanation, "is_new": True}
-
-    def _analyze_images_parallel(self, image_paths: List[str], prompt: str, title_prefix: str) -> List[Dict[str, str]]:
+    def _analyze_plot_images(self, image_paths: List[str], prompt: str) -> List[Dict[str, str]]:
         if not image_paths:
             return []
 
-        unique_paths = list(dict.fromkeys([p for p in image_paths if p and os.path.exists(p)]))
-        if not unique_paths:
+        existing_explanations = self.context.setdefault("knowledge_base", {}).setdefault("plot_explanations", [])
+        existing_analyses = self.context.setdefault("knowledge_base", {}).setdefault("image_analyses", [])
+
+        existing_paths = {item.get("file_path") for item in existing_explanations if item.get("file_path")}
+        existing_paths |= {item.get("file_path") for item in existing_analyses if item.get("file_path")}
+
+        targets = [p for p in image_paths if p and p not in existing_paths]
+        if not targets:
             return []
 
         def run_one(path: str):
-            # Cache vision results by file hash + prompt hash.
-            file_hash = self._hash_file(path) or path
-            prompt_key = hashlib.sha256((prompt or "").encode("utf-8", errors="ignore")).hexdigest()
-            cache_key = f"vision::{file_hash}::{prompt_key}"
-            cached = self._cache_get_ttl(cache_key, self.VISION_CACHE_TTL_SECONDS)
-            if isinstance(cached, str) and cached.strip():
-                explanation = cached
-            else:
-                explanation = self.agents["vision_agent"]["module"].run({
-                    "image_path": path,
-                    "prompt": prompt,
-                })
-                if isinstance(explanation, str) and explanation.strip():
-                    self._cache_set_ttl(cache_key, explanation, self.VISION_CACHE_TTL_SECONDS)
+            explanation = self.agents["vision_agent"]["module"].run({
+                "image_path": path,
+                "prompt": prompt,
+            })
+
             try:
                 rel = os.path.relpath(path, start=os.getcwd()).replace("\\", "/")
             except Exception:
                 rel = str(path).replace("\\", "/")
             dash_src = rel if rel.startswith("../") else f"../{rel}"
+
             return {
                 "file_path": path,
-                "image": dash_src,
-                "title": f"{title_prefix}: {os.path.basename(path)}",
                 "explanation": explanation,
+                "dash_src": dash_src,
             }
 
-        # Ollama vision calls can contend heavily; keep concurrency modest by default.
-        max_workers = min(self.vision_workers, len(unique_paths))
+        max_workers = min(4, len(targets))
         results = []
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            for item in ex.map(run_one, unique_paths):
-                if item:
+            for item in ex.map(run_one, targets):
+                if item and item.get("file_path"):
                     results.append(item)
 
-        return results
-
-    def _analyze_plots_batch(self, plot_paths: List[str], prompt: str) -> List[Dict[str, str]]:
-        if not plot_paths:
-            return []
-
-        existing_explanations = self.context.setdefault("knowledge_base", {}).setdefault("plot_explanations", [])
-        existing_files = {item.get("file_path") for item in existing_explanations if isinstance(item, dict)}
-
-        new_paths = [p for p in plot_paths if p and p not in existing_files]
-        if not new_paths:
-            return []
-
-        if self.max_plot_analyses is not None and self.max_plot_analyses >= 0:
-            new_paths = new_paths[: self.max_plot_analyses]
-
-        analysis_items = self._analyze_images_parallel(
-            new_paths,
-            prompt,
-            "Plot Analysis",
-        )
-
-        for item in analysis_items:
+        for item in results:
             existing_explanations.append({
-                "file_path": item.get("file_path"),
-                "explanation": item.get("explanation"),
+                "file_path": item["file_path"],
+                "explanation": item["explanation"],
+            })
+            existing_analyses.append({
+                "title": f"Plot Analysis: {os.path.basename(item['file_path'])}",
+                "file_path": item["file_path"],
+                "image": item["dash_src"],
+                "explanation": item["explanation"],
             })
 
-        analyses = self.context.setdefault("knowledge_base", {}).setdefault("image_analyses", [])
-        for item in analysis_items:
-            analyses.append({
-                "title": item.get("title"),
-                "file_path": item.get("file_path"),
-                "image": item.get("image"),
-                "explanation": item.get("explanation"),
-            })
-
-        return analysis_items
+        return [
+            {"title": os.path.basename(item["file_path"]), "text": item["explanation"]}
+            for item in results
+        ]
 
     def _format_plot_explanations(self, explanations: List[Dict[str, str]]) -> str:
         if not explanations:
@@ -526,21 +358,37 @@ class WasteDispoMaster:
         if not image_list:
             return []
 
-        analyses = self._analyze_images_parallel(
-            image_list,
-            "Explain this image in detail and relate it to waste, pollution, and sustainability where relevant.",
-            "Image Analysis",
-        )
-
+        analyses = []
         summaries = []
+        for image_path in image_list:
+            if not image_path or not os.path.exists(image_path):
+                continue
+
+            explanation = self.agents["vision_agent"]["module"].run({
+                "image_path": image_path,
+                "prompt": "Explain this image in detail and relate it to waste, pollution, and sustainability where relevant.",
+            })
+
+            # Dashboard is generated under interface/, so use ../ relative src.
+            try:
+                rel = os.path.relpath(image_path, start=os.getcwd()).replace("\\", "/")
+            except Exception:
+                rel = str(image_path).replace("\\", "/")
+            dash_src = rel if rel.startswith("../") else f"../{rel}"
+
+            analyses.append({
+                "title": f"Image Analysis: {os.path.basename(image_path)}",
+                "file_path": image_path,
+                "image": dash_src,
+                "explanation": explanation,
+            })
+            summaries.append(f"{os.path.basename(image_path)}: {explanation}")
+
         if analyses:
             self.context.setdefault("knowledge_base", {}).setdefault("image_analyses", []).extend(analyses)
             self.context["knowledge_base"]["master_insights"] = self._build_master_insights(self.context["knowledge_base"])
             self.agents["dashboard_agent"]["module"].run({"knowledge_base": self.context["knowledge_base"]})
             self.session.save(self.context)
-            for item in analyses:
-                summaries.append(f"{os.path.basename(item.get('file_path') or '')}: {item.get('explanation')}")
-
         return summaries
 
     def _build_master_insights(self, kb: Dict) -> List[str]:
@@ -842,19 +690,20 @@ class WasteDispoMaster:
 
         def run_research():
             research_query = f"Waste management, pollution, and sustainability updates for {place}".strip()
-            if self.fast_mode:
-                analyzer = ResearchAnalyzer(max_results=3, model_name=self.model_name, include_images=False, enable_fallback_model=False)
-            else:
-                analyzer = ResearchAnalyzer(max_results=6, model_name=self.model_name, include_images=True, enable_fallback_model=False)
+            analyzer = ResearchAnalyzer(
+                max_results=6,
+                model_name=self.model_name,
+                include_images=True,
+                enable_fallback_model=False,
+            )
             return analyzer.run_research(research_query)
 
         # 1-2) ENV + RESEARCH (multitask)
-        with self._perf("ENV+RESEARCH"):
-            with ThreadPoolExecutor(max_workers=2) as ex:
-                fut_env = ex.submit(run_env)
-                fut_research = ex.submit(run_research)
-                env_res = fut_env.result()
-                search_res = fut_research.result()
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fut_env = ex.submit(run_env)
+            fut_research = ex.submit(run_research)
+            env_res = fut_env.result()
+            search_res = fut_research.result()
 
         self.context["knowledge_base"]["env_agent"] = env_res
         self.context["knowledge_base"]["search_agent"] = search_res
@@ -862,8 +711,7 @@ class WasteDispoMaster:
         execution_log.append({"agent": "search_agent", "result": search_res})
 
         # 3) PLOT (deterministic: reduce agent work + avoid LLM plot failures)
-        with self._perf("PLOTS (fallback)"):
-            plot_res = self._plot_env_snapshot_fallback(env_res if isinstance(env_res, dict) else {})
+        plot_res = self._plot_env_snapshot_fallback(env_res if isinstance(env_res, dict) else {})
 
         self.context["knowledge_base"]["plotter_agent"] = plot_res
         execution_log.append({"agent": "plotter_agent", "result": plot_res})
@@ -877,29 +725,24 @@ class WasteDispoMaster:
 
         plot_explanations = []
 
-        if self._should_explain_plots_mode(user_text) and isinstance(plot_res, dict) and plot_res.get("success"):
+        # Always explain generated plots using vision.
+        if isinstance(plot_res, dict) and plot_res.get("success"):
             plot_paths = plot_res.get("file_paths") or []
             if plot_res.get("file_path"):
                 plot_paths = [plot_res.get("file_path")] + plot_paths
-            plot_paths = list(dict.fromkeys([p for p in plot_paths if p]))
 
-            with self._perf("VISION (plots)"):
-                analysis_items = self._analyze_plots_batch(
-                    plot_paths,
-                    "Explain this chart in detail. Identify axes, key trends, and what it implies about waste/environment. "
-                    "Provide 3-5 concise insights and 1-2 recommended actions.",
-                )
-                for item in analysis_items:
-                    execution_log.append({"agent": "vision_agent", "result": {"success": True, "file_path": item.get("file_path"), "explanation": item.get("explanation")}})
-                    plot_explanations.append({
-                        "title": os.path.basename(item.get("file_path") or ""),
-                        "text": item.get("explanation"),
-                    })
+            unique_paths = list(dict.fromkeys([p for p in plot_paths if p]))
+            plot_explanations.extend(self._analyze_plot_images(
+                unique_paths,
+                "Explain this chart in detail. Identify axes, key trends, and what it implies about waste/environment. "
+                "Provide 3-5 concise insights and 1-2 recommended actions.",
+            ))
+            for item in plot_explanations:
+                execution_log.append({"agent": "vision_agent", "result": {"success": True, "file_path": item.get("title"), "explanation": item.get("text")}})
 
         # 4) DASHBOARD (+ master insights)
         self.context.setdefault("knowledge_base", {})["master_insights"] = self._build_master_insights(self.context["knowledge_base"])
-        with self._perf("DASHBOARD"):
-            dash_res = self.agents["dashboard_agent"]["module"].run({"knowledge_base": self.context["knowledge_base"]})
+        dash_res = self.agents["dashboard_agent"]["module"].run({"knowledge_base": self.context["knowledge_base"]})
         self.context["knowledge_base"]["dashboard_agent"] = dash_res
         execution_log.append({"agent": "dashboard_agent", "result": dash_res})
         if isinstance(dash_res, dict) and dash_res.get("file_path") and dash_res.get("file_path") not in self.context["created_files"]:
@@ -947,45 +790,6 @@ class WasteDispoMaster:
         if plot_analysis:
             lines.append(plot_analysis)
 
-        return "\n".join(lines)
-
-    def _quick_response_from_kb(self, user_text: str) -> str:
-        kb = self.context.get("knowledge_base") or {}
-        env_res = kb.get("env_agent") if isinstance(kb.get("env_agent"), dict) else {}
-        search_res = kb.get("search_agent") if isinstance(kb.get("search_agent"), dict) else {}
-        plot_res = kb.get("plotter_agent") if isinstance(kb.get("plotter_agent"), dict) else {}
-        dash_res = kb.get("dashboard_agent") if isinstance(kb.get("dashboard_agent"), dict) else {}
-
-        place = (env_res.get("place") if isinstance(env_res, dict) else None) or self.context.get("location") or "Unknown"
-        env_data = (env_res or {}).get("environmental_data", {}) if isinstance(env_res, dict) else {}
-        temperature = env_data.get("temperature")
-        humidity = env_data.get("humidity")
-        wind = env_data.get("wind_speed") or env_data.get("windspeed_openmeteo")
-        cached_flag = " (cached)" if isinstance(env_res, dict) and env_res.get("cached") else ""
-
-        lines = [
-            f"Environmental snapshot for {place}{cached_flag}:",
-            f"- Temperature: {temperature if temperature is not None else 'N/A'} °C",
-            f"- Humidity: {humidity if humidity is not None else 'N/A'} %",
-            f"- Wind: {wind if wind is not None else 'N/A'}",
-        ]
-
-        if isinstance(search_res, dict) and search_res.get("success"):
-            titles = []
-            for item in (search_res.get("report") or [])[:3]:
-                t = (item or {}).get("title")
-                if t:
-                    titles.append(t)
-            if titles:
-                lines.append("Top research signals:")
-                lines.extend([f"- {t}" for t in titles])
-
-        plot_path = plot_res.get("file_path") if isinstance(plot_res, dict) else None
-        if plot_path:
-            lines.append(f"Plot saved: {plot_path}")
-        dash_path = dash_res.get("file_path") if isinstance(dash_res, dict) else None
-        if dash_path:
-            lines.append(f"Dashboard: {dash_path}")
         return "\n".join(lines)
 
     def _should_run_plotter(self, params: Dict, user_text: str) -> bool:
@@ -1036,12 +840,11 @@ class WasteDispoMaster:
             place = (env_action.get("parameters") or {}).get("place") or self.context.get("location") or "Unknown"
             query = (search_action.get("parameters") or {}).get("query") or ""
 
-            with self._perf("ENV+RESEARCH"):
-                with ThreadPoolExecutor(max_workers=2) as ex:
-                    fut_env = ex.submit(self._run_env_cached, place)
-                    fut_search = ex.submit(self._run_research_cached, query)
-                    env_res = fut_env.result()
-                    search_res = fut_search.result()
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                fut_env = ex.submit(self._run_env_cached, place)
+                fut_search = ex.submit(self.agents["search_agent"]["module"].run, {"query": query})
+                env_res = fut_env.result()
+                search_res = fut_search.result()
 
             execution_log.append({"agent": "env_agent", "result": env_res})
             execution_log.append({"agent": "search_agent", "result": search_res})
@@ -1057,8 +860,7 @@ class WasteDispoMaster:
                 # ENV caching: reuse env data for 1 hour.
                 if intent == "env_agent":
                     place = params.get("place") or self.context.get("location") or "Unknown"
-                    with self._perf("ENV"):
-                        res = self._run_env_cached(place)
+                    res = self._run_env_cached(place)
 
                     execution_log.append({"agent": intent, "result": res})
 
@@ -1123,14 +925,7 @@ class WasteDispoMaster:
                                 params = {**params, "query": auto_query}
                             else:
                                 params = {**params, "query": user_text}
-                        if intent == "search_agent":
-                            with self._perf("RESEARCH"):
-                                res = self._run_research_cached((params or {}).get("query") or "")
-                        elif intent == "plotter_agent":
-                            with self._perf("PLOTS"):
-                                res = self.agents[intent]["module"].run(params)
-                        else:
-                            res = self.agents[intent]["module"].run(params)
+                        res = self.agents[intent]["module"].run(params)
                     execution_log.append({"agent": intent, "result": res})
 
                 # Track created files
@@ -1141,24 +936,21 @@ class WasteDispoMaster:
                         if fp and fp not in self.context["created_files"]:
                             self.context["created_files"].append(fp)
 
-                    # Explain plots only when requested (or explicitly configured).
-                    if intent == "plotter_agent" and res.get("success") and self._should_explain_plots_mode(user_text):
+                    # Always explain generated plots using the vision agent
+                    if intent == "plotter_agent" and res.get("success"):
                         plot_paths = res.get("file_paths") or []
                         if res.get("file_path"):
                             plot_paths = [res.get("file_path")] + plot_paths
 
-                        with self._perf("VISION (plots)"):
-                            analysis_items = self._analyze_plots_batch(
-                                list(dict.fromkeys([p for p in plot_paths if p])),
-                                "Explain this chart in detail. Identify the axes, key trends, outliers, and what it implies. "
-                                "Provide 3-5 concise insights and 1-2 recommended actions related to waste/environment.",
-                            )
-                        for item in analysis_items:
-                            execution_log.append({"agent": "vision_agent", "result": {"success": True, "file_path": item.get("file_path"), "explanation": item.get("explanation")}})
-                            plot_explanations.append({
-                                "title": os.path.basename(item.get("file_path") or ""),
-                                "text": item.get("explanation"),
-                            })
+                        unique_paths = list(dict.fromkeys([p for p in plot_paths if p]))
+                        new_explanations = self._analyze_plot_images(
+                            unique_paths,
+                            "Explain this chart in detail. Identify the axes, key trends, outliers, and what it implies. "
+                            "Provide 3-5 concise insights and 1-2 recommended actions related to waste/environment.",
+                        )
+                        plot_explanations.extend(new_explanations)
+                        for item in new_explanations:
+                            execution_log.append({"agent": "vision_agent", "result": {"success": True, "file_path": item.get("title"), "explanation": item.get("text")}})
 
                 # Update Knowledge Base
                 self.context["knowledge_base"][intent] = res
@@ -1169,8 +961,7 @@ class WasteDispoMaster:
         if dashboard_requested and self.agents["dashboard_agent"]["module"]:
             # Keep the dashboard informative even on single-agent runs.
             self.context["knowledge_base"]["master_insights"] = self._build_master_insights(self.context["knowledge_base"])
-            with self._perf("DASHBOARD"):
-                dash_res = self.agents["dashboard_agent"]["module"].run({"knowledge_base": self.context["knowledge_base"]})
+            dash_res = self.agents["dashboard_agent"]["module"].run({"knowledge_base": self.context["knowledge_base"]})
             execution_log.append({"agent": "dashboard_agent", "result": dash_res})
             self.context["knowledge_base"]["dashboard_agent"] = dash_res
             if isinstance(dash_res, dict) and dash_res.get("file_path") and dash_res.get("file_path") not in self.context["created_files"]:
@@ -1179,11 +970,7 @@ class WasteDispoMaster:
         self.context["is_processing"] = False
         self.context["last_suggested_actions"] = []
         self.session.save(self.context)
-        # For auto-triggered / report-style runs, avoid an extra synthesis LLM call (big latency).
-        if force_full_actions or self.fast_mode:
-            response = self._quick_response_from_kb(user_text)
-        else:
-            response = self._synthesize_final_response(execution_log, user_text)
+        response = self._synthesize_final_response(execution_log, user_text)
         plot_analysis = self._format_plot_explanations(plot_explanations)
         if plot_analysis:
             response = f"{response}\n\n{plot_analysis}"
@@ -1229,20 +1016,18 @@ class WasteDispoMaster:
             self.session.save(self.context)
             return f"Image analyzed: {image_path}"
 
-        # Full report request: use the dedicated pipeline (faster + deterministic output).
-        if self._is_full_report_request(user_text):
-            with self._perf("FULL REPORT"):
-                return self._run_full_report_pipeline(user_text)
-
         # Implicit consent: user confirms a previously suggested action.
         if self._is_affirmative_text(user_text) and self.context.get("last_suggested_actions"):
             actions = self.context.get("last_suggested_actions") or []
             return self._run_actions(actions, user_text, force_full_actions=True)
 
-        # Zero-permission auto triggering (defaults to slim bundle for speed).
+        # Zero-permission auto triggering.
         auto_actions = self._auto_actions_from_text(user_text)
         if auto_actions:
             return self._run_actions(auto_actions, user_text, force_full_actions=True)
+
+        if self._is_full_report_request(user_text):
+            return self._run_full_report_pipeline(user_text)
 
         # 1. Decide Intent
         # Single-model policy: always use self.model_name.
@@ -1273,16 +1058,106 @@ class WasteDispoMaster:
             self.session.save(self.context)
         return ai_content
 
+    def _grade_response_quality(self, response_text: str, data_completeness: float = 0.8) -> Dict:
+        """
+        Grades the quality of a response based on multiple factors.
+        Returns a dict with grade and confidence score (0-100).
+        """
+        score = 50  # base score
+        
+        # Factor 1: Response length and detail
+        word_count = len(response_text.split())
+        if word_count > 150:
+            score += 20
+        elif word_count > 75:
+            score += 10
+        
+        # Factor 2: Presence of actionable insights
+        if any(keyword in response_text.lower() for keyword in ["action", "recommendation", "suggest", "improve"]):
+            score += 15
+        
+        # Factor 3: Data completeness
+        score += int(data_completeness * 15)
+        
+        # Factor 4: Specific metrics/numbers
+        if any(char.isdigit() for char in response_text):
+            score += 10
+        
+        # Determine grade
+        if score >= 85:
+            grade = "A"
+        elif score >= 70:
+            grade = "B"
+        elif score >= 55:
+            grade = "C"
+        else:
+            grade = "D"
+        
+        return {"grade": grade, "score": min(score, 100), "completeness": data_completeness}
+
     def _synthesize_final_response(self, logs, original_query):
         data_summary = json.dumps(logs, indent=2)
+        
+        # Calculate data completeness
+        successful_agents = sum(1 for log in logs if isinstance(log.get("result"), dict) and log.get("result", {}).get("success"))
+        total_agents = len(logs) if logs else 1
+        data_completeness = successful_agents / total_agents if total_agents > 0 else 0
+        
+        # Reduced prompt for 4K token sweet spot
         prompt = (
             f"The user asked: '{original_query}'\nResults: {data_summary}\n\n"
-            f"Synthesize this into a high-end expert response. Be assertive. "
-            f"Provide a guided tour of the dashboard sections (visual analytics, environmental metrics, research intelligence, and data vault). "
-            f"Emphasize that all data sources have been fully injected into the Command Center."
+            f"Provide a concise, chat-friendly response (200-400 words max). "
+            f"Focus on: 1) Key findings, 2) Risk assessment, 3) Top 3 actions. "
+            f"Be direct and actionable. Avoid verbose explanations."
         )
-        response = ollama.chat(model=self.model_name, messages=[{'role': 'user', 'content': prompt}])
-        return response['message']['content']
+        response = ollama.chat(
+            model=self.model_name, 
+            messages=[{'role': 'user', 'content': prompt}],
+            stream=False
+        )
+        response_text = response['message']['content']
+        
+        # Clean markdown and special characters
+        response_text = self._clean_response_text(response_text)
+        
+        # Grade the response quality
+        quality = self._grade_response_quality(response_text, data_completeness)
+        
+        # Only show quality metric if grade is low
+        if quality["grade"] in ["C", "D"]:
+            response_text += f"\n[Data: {quality['completeness']*100:.0f}% | Grade: {quality['grade']}]"
+        
+        return response_text
+    
+    def _clean_response_text(self, text: str) -> str:
+        """Remove markdown and special formatting from response."""
+        if not text:
+            return text
+        
+        # Remove LaTeX-style math: $...$
+        text = re.sub(r'\$[^$]*\$', '', text)
+        
+        # Remove markdown bold/italic: **text**, *text*, __text__, _text_
+        text = re.sub(r'\*\*([^*]*)\*\*', r'\1', text)
+        text = re.sub(r'\*([^*]*)\*', r'\1', text)
+        text = re.sub(r'__([^_]*)__', r'\1', text)
+        text = re.sub(r'_([^_]*)_', r'\1', text)
+        
+        # Remove markdown headers: ### text -> text
+        text = re.sub(r'#{1,6}\s+', '', text)
+        
+        # Remove markdown code blocks
+        text = re.sub(r'```[^`]*```', '', text)
+        text = re.sub(r'`([^`]*)`', r'\1', text)
+        
+        # Remove markdown links: [text](url) -> text
+        text = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', text)
+        
+        # Clean up spacing
+        text = re.sub(r'\n\n+', '\n', text)
+        text = re.sub(r' +', ' ', text)
+        
+        return text.strip()
 
     def get_status_update(self):
         """Provides quick status updates while Master is working."""
@@ -1309,10 +1184,7 @@ class PlotterAgentWrapper:
 class ResearchAgentWrapper:
     def __init__(self):
         from Agents.research import ResearchAnalyzer
-        fast = (os.getenv("SUSTAINAI_FAST_MODE") or "").strip().lower() in ("1", "true", "yes", "on")
-        max_results = 3 if fast else 6
-        include_images = False if fast else True
-        self.r = ResearchAnalyzer(max_results=max_results, model_name="gemma4:31b-cloud", include_images=include_images, enable_fallback_model=False)
+        self.r = ResearchAnalyzer(max_results=6, model_name="gemma4:31b-cloud", include_images=True, enable_fallback_model=False)
     def run(self, p): return self.r.run_research(p.get("query", ""))
 
 class DashboardAgentWrapper:

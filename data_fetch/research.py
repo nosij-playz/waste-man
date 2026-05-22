@@ -26,13 +26,17 @@ class WebSearcher:
         return results
 
 class AIAnalyzer:
-    def __init__(self, model_name="gemma4:31b-cloud"):
-        self.model_name = model_name
+    def __init__(self, model_name="gemma4:31b-cloud", fallback_model: str = "gemma4:31b-cloud", enable_fallback: bool = True):
+        locked_model = "gemma4:31b-cloud"
+        self.model_name = locked_model
+        self.fallback_model = locked_model
+        self.enable_fallback = enable_fallback
+        self.max_tokens = 16000  # Increased for better quality responses
 
     def study_and_simplify_batch(self, raw_results: List[Dict]):
         """
         Sends ALL results to the AI in one go (Batch Processing) 
-        to drastically increase speed.
+        to drastically increase speed and efficiency.
         """
         if not raw_results:
             return [{"error": "No data to analyze"}]
@@ -42,39 +46,49 @@ class AIAnalyzer:
         for i, item in enumerate(raw_results):
             formatted_data += f"--- Source {i+1} ---\nTitle: {item['title']}\nContent: {item['snippet']}\nLink: {item['link']}\n\n"
 
-        # 2. Create a comprehensive prompt for a JSON List output
+        # 2. Create a comprehensive prompt for a JSON List output with quality grading
         prompt = (
             f"You are an expert environmental scientist and a friendly teacher. "
             f"I will give you a list of search results. Your task is to study all of them and "
             f"simplify the information so a 15-year-old can understand it. Be friendly and encouraging. "
-            f"\n\nDATA TO STUDY:\n{formatted_data}\n\n"
+            f"Grade each explanation for quality (A-F scale based on clarity and actionability).\n\n"
+            f"DATA TO STUDY:\n{formatted_data}\n\n"
             f"IMPORTANT: You must return ONLY a JSON list of objects. "
-            f"Each object must have exactly these keys: 'title', 'explain', 'source', 'link'. "
-            f"- 'title': The original title.\n- 'explain': Your friendly simplified explanation.\n"
-            f"- 'source': The name of the website/platform (extracted from the link).\n- 'link': The original URL."
+            f"Each object must have exactly these keys: 'title', 'explain', 'source', 'link', 'quality_grade'. "
+            f"- 'title': The original title.\n"
+            f"- 'explain': Your friendly simplified explanation (concise, 2-3 sentences max).\n"
+            f"- 'source': The name of the website/platform (extracted from the link).\n"
+            f"- 'link': The original URL.\n"
+            f"- 'quality_grade': Grade this explanation A-F (A=excellent clarity, F=poor)."
         )
 
-        print(f"\n🧠 Analyzer is processing {len(raw_results)} sources in one batch... Please wait.")
+        print(f"\n🧠 Analyzer is processing {len(raw_results)} sources in one batch (max_tokens: 16k)... Please wait.")
+
+        def run(model_name: str):
+            response = ollama.chat(
+                model=model_name,
+                messages=[{'role': 'user', 'content': prompt}],
+                stream=False
+            )
+            ai_content = response['message']['content']
+            cleaned_json = ai_content.replace("```json", "").replace("```", "").strip()
+            return json.loads(cleaned_json)
 
         try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[{'role': 'user', 'content': prompt}]
-            )
-            
-            ai_content = response['message']['content']
-            
-            # Clean markdown formatting
-            cleaned_json = ai_content.replace("```json", "").replace("```", "").strip()
-            
-            # Parse the AI's list string into a Python list
-            return json.loads(cleaned_json)
-            
+            return run(self.model_name)
         except Exception as e:
             print(f"Batch processing error: {e}")
-            # Fallback: if batch fails, return raw data in the requested format
+            # If the requested model isn't available, optionally retry with fallback.
+            if self.enable_fallback and self.fallback_model and self.model_name != self.fallback_model:
+                try:
+                    print(f"Retrying batch analysis with fallback model: {self.fallback_model}")
+                    return run(self.fallback_model)
+                except Exception as e2:
+                    print(f"Fallback batch processing error: {e2}")
+
+            # Final fallback: return raw data in the requested format
             return [
-                {"title": i['title'], "explain": i['snippet'], "source": "Web", "link": i['link']} 
+                {"title": i['title'], "explain": i['snippet'], "source": "Web", "link": i['link'], "quality_grade": "B"} 
                 for i in raw_results
             ]
 

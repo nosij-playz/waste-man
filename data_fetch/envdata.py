@@ -1,4 +1,5 @@
 import requests
+from concurrent.futures import ThreadPoolExecutor
 
 
 def safe_get(url, params=None, headers=None, timeout=15):
@@ -80,61 +81,6 @@ def get_coords_from_place(place_name, locationiq_key):
 def get_env_data(lat, lon, owm_key, weatherapi_key):
     data = {}
 
-    print("🌦 Fetching OpenWeatherMap data...")
-    res = safe_get(
-        "https://api.openweathermap.org/data/2.5/weather",
-        {
-            "lat": lat,
-            "lon": lon,
-            "units": "metric",
-            "appid": owm_key
-        }
-    )
-
-    if res:
-        main = res.get("main", {})
-        wind = res.get("wind", {})
-        clouds = res.get("clouds", {})
-        rain = res.get("rain", {})
-
-        data.update({
-            "temperature": main.get("temp"),
-            "feels_like": main.get("feels_like"),
-            "temp_min": main.get("temp_min"),
-            "temp_max": main.get("temp_max"),
-            "pressure": main.get("pressure"),
-            "humidity": main.get("humidity"),
-            "wind_speed": wind.get("speed"),
-            "wind_deg": wind.get("deg"),
-            "wind_gust": wind.get("gust"),
-            "cloud_coverage": clouds.get("all"),
-            "rain_1h": rain.get("1h", 0),
-            "rain_3h": rain.get("3h", 0),
-            "visibility": res.get("visibility")
-        })
-
-    print("🌤 Fetching WeatherAPI data...")
-    res = safe_get(
-        "https://api.weatherapi.com/v1/current.json",
-        {
-            "key": weatherapi_key,
-            "q": f"{lat},{lon}"
-        }
-    )
-
-    if res:
-        current = res.get("current", {})
-
-        data.update({
-            "uv_index": current.get("uv"),
-            "visibility_km": current.get("vis_km"),
-            "wind_dir": current.get("wind_dir"),
-            "wind_kph": current.get("wind_kph"),
-            "gust_kph": current.get("gust_kph"),
-            "precip_mm": current.get("precip_mm")
-        })
-
-    print("🌍 Fetching Open-Meteo data...")
     hourly_vars = [
         "soil_temperature_0_to_7cm",
         "soil_temperature_7_to_28cm",
@@ -154,20 +100,87 @@ def get_env_data(lat, lon, owm_key, weatherapi_key):
         "windgusts_10m"
     ]
 
-    res = safe_get(
-        "https://api.open-meteo.com/v1/ecmwf",
-        {
-            "latitude": lat,
-            "longitude": lon,
-            "hourly": ",".join(hourly_vars),
-            "current_weather": True,
-            "timezone": "auto"
-        }
-    )
+    def fetch_openweather():
+        print("🌦 Fetching OpenWeatherMap data...")
+        return safe_get(
+            "https://api.openweathermap.org/data/2.5/weather",
+            {
+                "lat": lat,
+                "lon": lon,
+                "units": "metric",
+                "appid": owm_key
+            }
+        )
 
-    if res:
-        current_weather = res.get("current_weather", {})
-        hourly = res.get("hourly", {})
+    def fetch_weatherapi():
+        print("🌤 Fetching WeatherAPI data...")
+        return safe_get(
+            "https://api.weatherapi.com/v1/current.json",
+            {
+                "key": weatherapi_key,
+                "q": f"{lat},{lon}"
+            }
+        )
+
+    def fetch_openmeteo():
+        print("🌍 Fetching Open-Meteo data...")
+        return safe_get(
+            "https://api.open-meteo.com/v1/ecmwf",
+            {
+                "latitude": lat,
+                "longitude": lon,
+                "hourly": ",".join(hourly_vars),
+                "current_weather": True,
+                "timezone": "auto"
+            }
+        )
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        fut_owm = ex.submit(fetch_openweather)
+        fut_wapi = ex.submit(fetch_weatherapi)
+        fut_om = ex.submit(fetch_openmeteo)
+
+        res_owm = fut_owm.result()
+        res_wapi = fut_wapi.result()
+        res_om = fut_om.result()
+
+    if res_owm:
+        main = res_owm.get("main", {})
+        wind = res_owm.get("wind", {})
+        clouds = res_owm.get("clouds", {})
+        rain = res_owm.get("rain", {})
+
+        data.update({
+            "temperature": main.get("temp"),
+            "feels_like": main.get("feels_like"),
+            "temp_min": main.get("temp_min"),
+            "temp_max": main.get("temp_max"),
+            "pressure": main.get("pressure"),
+            "humidity": main.get("humidity"),
+            "wind_speed": wind.get("speed"),
+            "wind_deg": wind.get("deg"),
+            "wind_gust": wind.get("gust"),
+            "cloud_coverage": clouds.get("all"),
+            "rain_1h": rain.get("1h", 0),
+            "rain_3h": rain.get("3h", 0),
+            "visibility": res_owm.get("visibility")
+        })
+
+    if res_wapi:
+        current = res_wapi.get("current", {})
+
+        data.update({
+            "uv_index": current.get("uv"),
+            "visibility_km": current.get("vis_km"),
+            "wind_dir": current.get("wind_dir"),
+            "wind_kph": current.get("wind_kph"),
+            "gust_kph": current.get("gust_kph"),
+            "precip_mm": current.get("precip_mm")
+        })
+
+    if res_om:
+        current_weather = res_om.get("current_weather", {})
+        hourly = res_om.get("hourly", {})
 
         data["temperature_openmeteo"] = current_weather.get("temperature")
         data["windspeed_openmeteo"] = current_weather.get("windspeed")

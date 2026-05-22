@@ -7,10 +7,10 @@ import os
 # ==========================================
 # CONFIGURATION
 # ==========================================
-# Voice: JennyNeural is a natural young adult female voice
-VOICE = "en-US-JennyNeural" 
-RATE = "+0%"   # Speed of speech (e.g., +10% for faster, -10% for slower)
-PITCH = "-5Hz" # Lowering pitch slightly removes the "childish" sound
+# Voice: AvaNeural is a natural young adult female voice
+VOICE = os.getenv("SUSTAINAI_TTS_VOICE", "en-US-AvaNeural")
+RATE = os.getenv("SUSTAINAI_TTS_RATE", "+2%")   # Speed of speech (e.g., +10% for faster, -10% for slower)
+PITCH = os.getenv("SUSTAINAI_TTS_PITCH", "+0Hz") # Neutral pitch for a natural adult tone
 OUTPUT_FILE = "response.mp3"
 
 # ==========================================

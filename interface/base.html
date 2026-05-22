@@ -2,574 +2,66 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5, user-scalable=yes">
-  <title>Waste-Dispo Intelligence | Command Center</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{SYSTEM_NAME}} Intelligence | Command Center</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  
-  <!-- Auto-refresh meta tag (fallsback) -->
-  <meta http-equiv="refresh" content="300">
-  
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      font-family: 'Space Grotesk', sans-serif;
       background: #030711;
-      background-image: 
-        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(6, 182, 212, 0.12), transparent),
-        radial-gradient(ellipse 40% 60% at 10% 80%, rgba(99, 102, 241, 0.08), transparent),
-        radial-gradient(ellipse 30% 50% at 90% 30%, rgba(34, 211, 238, 0.06), transparent);
+      background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(6, 182, 212, 0.12), transparent),
+                      radial-gradient(ellipse 40% 60% at 10% 80%, rgba(99, 102, 241, 0.08), transparent),
+                      radial-gradient(ellipse 30% 50% at 90% 30%, rgba(34, 211, 238, 0.06), transparent);
       color: #e2e8f0;
-      line-height: 1.5;
-      letter-spacing: -0.01em;
       min-height: 100vh;
     }
-    
-    /* Premium glass effect */
     .glass-premium {
       background: rgba(8, 14, 28, 0.7);
       backdrop-filter: blur(20px) saturate(180%);
-      -webkit-backdrop-filter: blur(20px) saturate(180%);
       border: 1px solid rgba(255, 255, 255, 0.06);
-      box-shadow: 0 4px 24px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.02) inset;
       transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .glass-premium:hover {
       border-color: rgba(6, 182, 212, 0.25);
-      box-shadow: 0 12px 32px -8px rgba(0, 160, 200, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
       transform: translateY(-2px);
     }
-    
-    .gradient-text {
-      background: linear-gradient(135deg, #ffffff 0%, #a5f3fc 70%, #67e8f9 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    
-    .gradient-cyan {
-      background: linear-gradient(135deg, #06b6d4, #22d3ee);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    
-    .number-glow {
-      text-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
-    }
-    
-    .divider-gradient {
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.3), transparent);
-    }
-    
-    .custom-scroll::-webkit-scrollbar {
-      width: 4px;
-    }
-    .custom-scroll::-webkit-scrollbar-track {
-      background: rgba(255,255,255,0.01);
-    }
-    .custom-scroll::-webkit-scrollbar-thumb {
-      background: rgba(6, 182, 212, 0.25);
-      border-radius: 10px;
-    }
-
-    .pulse-dot {
-      animation: pulse-dot 2s infinite;
-    }
-    @keyframes pulse-dot {
-      0% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.7); }
-      70% { box-shadow: 0 0 0 8px rgba(6, 182, 212, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
-    }
-
-    /* Refresh indicator animation */
-    .refresh-indicator {
-      transition: all 0.3s ease;
-    }
-    .refreshing .refresh-indicator {
-      animation: spin 0.8s linear;
-    }
-    @keyframes spin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-
-    /* Countdown bar */
-    .countdown-bar {
-      height: 2px;
-      background: linear-gradient(90deg, #06b6d4, #22d3ee);
-      transition: width 1s linear;
-      position: fixed;
-      top: 0;
-      left: 0;
-      z-index: 9999;
-    }
-
-    /* Toast notification */
-    .toast {
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: rgba(8, 14, 28, 0.9);
-      backdrop-filter: blur(16px);
-      border: 1px solid rgba(6, 182, 212, 0.3);
-      border-radius: 12px;
-      padding: 12px 20px;
-      z-index: 9998;
-      transform: translateY(100px);
-      opacity: 0;
-      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-    }
-    .toast.show {
-      transform: translateY(0);
-      opacity: 1;
-    }
+    .gradient-cyan { background: linear-gradient(135deg, #06b6d4, #22d3ee); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .number-glow { text-shadow: 0 0 20px rgba(6, 182, 212, 0.3); }
   </style>
 </head>
 <body class="p-4 md:p-6 lg:p-8 flex flex-col items-center min-h-screen">
-
-  <!-- Countdown progress bar -->
-  <div class="countdown-bar" id="countdown-bar" style="width: 0%;"></div>
-
-  <!-- Toast notification for refresh -->
-  <div class="toast" id="refresh-toast">
-    <div class="flex items-center gap-2 text-sm">
-      <i class="fas fa-sync-alt text-cyan-400"></i>
-      <span class="text-slate-200">Dashboard refreshed</span>
-      <span class="text-slate-500 text-xs ml-2" id="toast-time"></span>
+  <header class="w-full max-w-[1440px] flex flex-wrap items-center justify-between gap-4 mb-6">
+    <div class="flex items-center gap-3">
+      <div class="h-12 w-12 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-400/30 flex items-center justify-center shadow-lg">
+        <i class="fas fa-recycle text-2xl text-cyan-300"></i>
+      </div>
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight"><span class="gradient-cyan">{{SYSTEM_NAME}}</span></h1>
+        <p class="text-xs font-medium tracking-[0.2em] text-slate-500 uppercase">Intelligence Command</p>
+      </div>
     </div>
+    <div class="flex items-center gap-5 glass-premium px-5 py-3 rounded-2xl">
+        <span class="text-sm font-medium text-slate-200 tracking-wide">SYSTEM OPERATIONAL</span>
+        <div class="w-px h-5 bg-slate-700/60"></div>
+        <span class="text-sm text-slate-400 font-mono" id="live-time">--:--:-- UTC</span>
+    </div>
+  </header>
+
+  <!-- This is where the AI will inject the la- l data -->
+  <div id="dashboard-content" class="w-full max-w-[1440px]">
+    {{DASHBOARD_BODY}}
   </div>
 
-  <!-- Main dashboard container -->
-  <div id="dashboard-content" class="w-full max-w-[1440px] flex flex-col gap-6">
-    
-    <!-- ========== HEADER: Trillion-dollar brand feel ========== -->
-    <header class="flex flex-wrap items-center justify-between gap-4 mb-2">
-      <div class="flex items-center gap-3">
-        <div class="h-12 w-12 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-400/30 flex items-center justify-center shadow-lg shadow-cyan-500/10">
-          <i class="fas fa-recycle text-2xl text-cyan-300"></i>
-        </div>
-        <div>
-          <h1 class="text-3xl md:text-4xl font-bold tracking-tight">
-            <span class="text-white">Waste</span><span class="gradient-cyan">Dispo</span>
-          </h1>
-          <p class="text-xs font-medium tracking-[0.2em] text-slate-500 uppercase mt-0.5">Intelligence Command</p>
-        </div>
-      </div>
-      <div class="flex items-center gap-5 glass-premium px-5 py-3 rounded-2xl">
-        <div class="flex items-center gap-2">
-          <span class="h-2.5 w-2.5 rounded-full bg-emerald-400 pulse-dot"></span>
-          <span class="text-sm font-medium text-slate-200 tracking-wide">SYSTEM OPERATIONAL</span>
-        </div>
-        <div class="w-px h-5 bg-slate-700/60"></div>
-        <span class="text-sm text-slate-400 font-mono" id="live-time">14:32:08 UTC</span>
-        <div class="w-px h-5 bg-slate-700/60"></div>
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-slate-500 uppercase tracking-widest">v3.9.1</span>
-          <button onclick="manualRefresh()" class="text-slate-500 hover:text-cyan-400 transition-colors refresh-indicator" id="refresh-btn" title="Refresh dashboard">
-            <i class="fas fa-sync-alt text-xs"></i>
-          </button>
-        </div>
-      </div>
-    </header>
-
-    <!-- Next refresh countdown -->
-    <div class="flex justify-end">
-      <span class="text-[10px] text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
-        <i class="fas fa-clock text-[10px]"></i> 
-        Next refresh in <span id="countdown-text" class="text-cyan-400 font-mono">5:00</span>
-      </span>
-    </div>
-
-    <!-- ========== TOP KPI ROW: Elite metrics ========== -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      
-      <!-- KPI 1 -->
-      <div class="glass-premium rounded-2xl p-5 flex flex-col">
-        <div class="flex justify-between items-start mb-2">
-          <span class="text-xs font-semibold text-slate-500 uppercase tracking-[0.15em]">Collection Volume</span>
-          <span class="bg-emerald-500/10 text-emerald-300 text-[11px] px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium">+12.4%</span>
-        </div>
-        <div class="text-4xl font-bold text-white number-glow tracking-tight">1,284<span class="text-xl text-slate-400 ml-1 font-medium">t</span></div>
-        <div class="mt-3 flex items-center gap-2 text-xs text-slate-400">
-          <i class="fas fa-arrow-up text-emerald-400 text-[10px]"></i> +8.2% vs yesterday
-        </div>
-        <div class="mt-4 w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-          <div class="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full" style="width: 78%;"></div>
-        </div>
-      </div>
-
-      <!-- KPI 2 -->
-      <div class="glass-premium rounded-2xl p-5 flex flex-col">
-        <div class="flex justify-between items-start mb-2">
-          <span class="text-xs font-semibold text-slate-500 uppercase tracking-[0.15em]">Active Routes</span>
-          <span class="bg-purple-500/10 text-purple-300 text-[11px] px-2 py-0.5 rounded-full border border-purple-500/20 font-medium">24/7</span>
-        </div>
-        <div class="text-4xl font-bold text-white number-glow tracking-tight">42<span class="text-xl text-slate-400 ml-1 font-medium">/48</span></div>
-        <div class="mt-3 flex items-center gap-2 text-xs text-slate-400">
-          <i class="fas fa-route text-cyan-400 text-[10px]"></i> 6 idle · optimal
-        </div>
-        <div class="mt-4 flex gap-2">
-          <span class="bg-slate-800/80 text-cyan-300 text-[11px] px-2.5 py-1 rounded-full border border-slate-700/60"><i class="fas fa-check-circle mr-1 text-[10px]"></i>87% eff.</span>
-        </div>
-      </div>
-
-      <!-- KPI 3 -->
-      <div class="glass-premium rounded-2xl p-5 flex flex-col">
-        <div class="flex justify-between items-start mb-2">
-          <span class="text-xs font-semibold text-slate-500 uppercase tracking-[0.15em]">Recycling Rate</span>
-          <span class="bg-emerald-500/10 text-emerald-300 text-[11px] px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium">target 70%</span>
-        </div>
-        <div class="text-4xl font-bold text-white number-glow tracking-tight">68.5<span class="text-xl text-slate-400 ml-1 font-medium">%</span></div>
-        <div class="mt-3 flex items-center gap-2 text-xs text-slate-400">
-          <i class="fas fa-leaf text-emerald-400 text-[10px]"></i> +2.1% vs last week
-        </div>
-        <div class="mt-4 w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-          <div class="h-full bg-gradient-to-r from-emerald-400 to-green-500 rounded-full" style="width: 68.5%;"></div>
-        </div>
-      </div>
-
-      <!-- KPI 4 -->
-      <div class="glass-premium rounded-2xl p-5 flex flex-col">
-        <div class="flex justify-between items-start mb-2">
-          <span class="text-xs font-semibold text-slate-500 uppercase tracking-[0.15em]">Critical Alerts</span>
-          <span class="bg-rose-500/10 text-rose-300 text-[11px] px-2 py-0.5 rounded-full border border-rose-500/20 font-medium">3 active</span>
-        </div>
-        <div class="text-4xl font-bold text-rose-400 number-glow tracking-tight">3<span class="text-xl text-slate-400 ml-1 font-medium">/12</span></div>
-        <div class="mt-3 flex items-center gap-2 text-xs text-slate-400">
-          <i class="fas fa-exclamation-triangle text-rose-400 text-[10px]"></i> Bin overflow
-        </div>
-        <div class="mt-4 flex gap-2">
-          <span class="bg-rose-900/20 text-rose-300 text-[11px] px-2 py-0.5 rounded-full border border-rose-500/20">NW-4</span>
-          <span class="bg-rose-900/20 text-rose-300 text-[11px] px-2 py-0.5 rounded-full border border-rose-500/20">SE-7</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- ========== MAIN VISUAL ROW: Map + Composition ========== -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      
-      <!-- Map area -->
-      <div class="lg:col-span-2 glass-premium rounded-2xl p-5 flex flex-col h-[420px]">
-        <div class="flex justify-between items-center mb-3">
-          <h2 class="text-sm font-semibold text-slate-200 uppercase tracking-widest flex items-center gap-2">
-            <i class="fas fa-map-marked-alt text-cyan-400"></i> Live Disposal Topology
-          </h2>
-          <span class="text-[10px] bg-slate-800/80 px-3 py-1 rounded-full text-slate-400 border border-slate-700/60">
-            <i class="fas fa-sync-alt fa-spin mr-1 text-cyan-400"></i> LIVE
-          </span>
-        </div>
-        <div class="flex-1 bg-[#020617] rounded-xl border border-slate-800/80 relative overflow-hidden flex items-center justify-center">
-          <div class="absolute inset-0 opacity-30" style="background-image: radial-gradient(circle at 25% 30%, #06b6d4 1px, transparent 1px), radial-gradient(circle at 70% 60%, #8b5cf6 1px, transparent 1px); background-size: 55px 55px;"></div>
-          <div class="relative z-10 flex flex-col items-center text-center p-8">
-            <div class="h-20 w-20 rounded-full bg-cyan-500/10 border border-cyan-400/30 flex items-center justify-center mb-5">
-              <i class="fas fa-satellite text-3xl text-cyan-300"></i>
-            </div>
-            <p class="text-lg font-medium text-white mb-1">18 vehicles active · 94% on-time</p>
-            <p class="text-sm text-slate-400 max-w-md">Real-time GPS geofencing across 12 collection zones. Predictive routing enabled.</p>
-            <div class="flex flex-wrap gap-2 mt-5 justify-center">
-              <span class="bg-slate-800/80 text-[11px] px-3 py-1.5 rounded-full border border-cyan-500/30 text-cyan-200"><i class="fas fa-circle text-[8px] text-cyan-400 mr-1"></i>Downtown (85%)</span>
-              <span class="bg-slate-800/80 text-[11px] px-3 py-1.5 rounded-full border border-purple-500/30 text-purple-200"><i class="fas fa-circle text-[8px] text-purple-400 mr-1"></i>Industrial</span>
-              <span class="bg-slate-800/80 text-[11px] px-3 py-1.5 rounded-full border border-rose-500/30 text-rose-200"><i class="fas fa-circle text-[8px] text-rose-400 mr-1"></i>Overflow alert</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Composition + priority -->
-      <div class="glass-premium rounded-2xl p-5 flex flex-col h-[420px]">
-        <h2 class="text-sm font-semibold text-slate-200 uppercase tracking-widest flex items-center gap-2 mb-5">
-          <i class="fas fa-chart-pie text-cyan-400"></i> Waste Composition
-        </h2>
-        <div class="flex-1 flex flex-col justify-center gap-5">
-          <div>
-            <div class="flex justify-between text-sm mb-1"><span class="text-slate-300">Organic</span><span class="text-white font-mono font-medium">42%</span></div>
-            <div class="w-full h-2 bg-slate-800 rounded-full"><div class="h-full bg-cyan-400 rounded-full" style="width:42%"></div></div>
-          </div>
-          <div>
-            <div class="flex justify-between text-sm mb-1"><span class="text-slate-300">Plastic</span><span class="text-white font-mono font-medium">28%</span></div>
-            <div class="w-full h-2 bg-slate-800 rounded-full"><div class="h-full bg-purple-400 rounded-full" style="width:28%"></div></div>
-          </div>
-          <div>
-            <div class="flex justify-between text-sm mb-1"><span class="text-slate-300">Glass</span><span class="text-white font-mono font-medium">15%</span></div>
-            <div class="w-full h-2 bg-slate-800 rounded-full"><div class="h-full bg-emerald-400 rounded-full" style="width:15%"></div></div>
-          </div>
-          <div>
-            <div class="flex justify-between text-sm mb-1"><span class="text-slate-300">Hazardous</span><span class="text-white font-mono font-medium">8%</span></div>
-            <div class="w-full h-2 bg-slate-800 rounded-full"><div class="h-full bg-amber-400 rounded-full" style="width:8%"></div></div>
-          </div>
-          <div>
-            <div class="flex justify-between text-sm mb-1"><span class="text-slate-300">E-waste</span><span class="text-white font-mono font-medium">7%</span></div>
-            <div class="w-full h-2 bg-slate-800 rounded-full"><div class="h-full bg-rose-400 rounded-full" style="width:7%"></div></div>
-          </div>
-        </div>
-        <div class="mt-5 pt-4 border-t border-slate-800 flex justify-between text-xs text-slate-500">
-          <span><i class="far fa-clock mr-1"></i> updated <span id="last-update-time">just now</span></span>
-          <span class="text-cyan-400 cursor-pointer hover:underline">full report →</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- ========== BOTTOM ROW: Activity & Fleet ========== -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      
-      <!-- Recent disposals log -->
-      <div class="glass-premium rounded-2xl p-5">
-        <h3 class="text-sm font-semibold text-slate-200 uppercase tracking-widest flex items-center gap-2 mb-4">
-          <i class="fas fa-history text-cyan-400"></i> Recent Transactions
-        </h3>
-        <div class="space-y-3 custom-scroll max-h-52 overflow-y-auto pr-1">
-          <div class="flex justify-between items-center text-sm border-b border-slate-800 pb-2.5">
-            <div><span class="text-cyan-300 font-mono font-medium">#WD-8821</span><span class="text-slate-500 ml-2 text-xs">Zone 4</span></div>
-            <span class="text-slate-300 text-xs">1.2t Organic</span>
-            <span class="text-emerald-400 text-[11px] font-mono">2m ago</span>
-          </div>
-          <div class="flex justify-between items-center text-sm border-b border-slate-800 pb-2.5">
-            <div><span class="text-cyan-300 font-mono font-medium">#WD-8820</span><span class="text-slate-500 ml-2 text-xs">Industrial</span></div>
-            <span class="text-slate-300 text-xs">0.8t Plastic</span>
-            <span class="text-emerald-400 text-[11px] font-mono">8m ago</span>
-          </div>
-          <div class="flex justify-between items-center text-sm border-b border-slate-800 pb-2.5">
-            <div><span class="text-cyan-300 font-mono font-medium">#WD-8819</span><span class="text-slate-500 ml-2 text-xs">Downtown</span></div>
-            <span class="text-slate-300 text-xs">2.1t Mixed</span>
-            <span class="text-slate-400 text-[11px] font-mono">14m ago</span>
-          </div>
-          <div class="flex justify-between items-center text-sm">
-            <div><span class="text-cyan-300 font-mono font-medium">#WD-8818</span><span class="text-slate-500 ml-2 text-xs">Park</span></div>
-            <span class="text-slate-300 text-xs">0.5t Glass</span>
-            <span class="text-slate-400 text-[11px] font-mono">22m ago</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Fleet overview -->
-      <div class="glass-premium rounded-2xl p-5">
-        <h3 class="text-sm font-semibold text-slate-200 uppercase tracking-widest flex items-center gap-2 mb-4">
-          <i class="fas fa-truck-moving text-cyan-400"></i> Fleet Status
-        </h3>
-        <div class="grid grid-cols-2 gap-3">
-          <div class="bg-slate-900/60 rounded-xl p-3.5 border border-slate-800/80">
-            <span class="text-[10px] text-slate-500 uppercase tracking-wider">Truck A12</span>
-            <div class="text-xl font-bold text-white mt-1">78%</div>
-            <span class="text-emerald-400 text-[11px]">en route</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-xl p-3.5 border border-slate-800/80">
-            <span class="text-[10px] text-slate-500 uppercase tracking-wider">Truck B7</span>
-            <div class="text-xl font-bold text-white mt-1">92%</div>
-            <span class="text-rose-400 text-[11px]">returning</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-xl p-3.5 border border-slate-800/80">
-            <span class="text-[10px] text-slate-500 uppercase tracking-wider">Truck C3</span>
-            <div class="text-xl font-bold text-white mt-1">45%</div>
-            <span class="text-cyan-400 text-[11px]">collecting</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-xl p-3.5 border border-slate-800/80">
-            <span class="text-[10px] text-slate-500 uppercase tracking-wider">Truck D9</span>
-            <div class="text-xl font-bold text-white mt-1">100%</div>
-            <span class="text-amber-400 text-[11px]">to depot</span>
-          </div>
-        </div>
-        <div class="mt-4 flex justify-between text-[11px] text-slate-500">
-          <span><i class="fas fa-gas-pump text-cyan-500/70 mr-1"></i> avg fuel 78%</span>
-          <span>next maint. in 3d</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Ultra-premium footer -->
-    <div class="mt-2 pt-5 border-t border-slate-800/70 flex flex-wrap justify-between items-center text-[10px] text-slate-600 uppercase tracking-widest">
-      <span>Waste-Dispo Intelligence Core · SOC 2 Type II · ISO 14001</span>
-      <span class="flex items-center gap-4">
-        <span>🔒 encrypted channel</span>
-        <span>latency 12ms</span>
-        <span>© 2026 WDI</span>
-      </span>
-    </div>
-  </div>
-
-  <!-- ========== AUTO-REFRESH LOGIC ========== -->
   <script>
-    (function() {
-      // Configuration
-      const REFRESH_INTERVAL = 300; // 5 minutes in seconds
-      const REFRESH_URL = window.location.href; // Refresh current page
-      
-      // DOM elements
-      const countdownBar = document.getElementById('countdown-bar');
-      const countdownText = document.getElementById('countdown-text');
-      const refreshBtn = document.getElementById('refresh-btn');
-      const lastUpdateTime = document.getElementById('last-update-time');
-      const refreshToast = document.getElementById('refresh-toast');
-      const toastTime = document.getElementById('toast-time');
-      
-      let remainingSeconds = REFRESH_INTERVAL;
-      let countdownInterval;
-      let lastRefreshTimestamp = new Date();
-      
-      // Update the live clock
-      function updateClock() {
-        const now = new Date();
-        const formatted = now.toLocaleTimeString('en-US', { 
-          hour12: false, 
-          hour: '2-digit', 
-          minute: '2-digit', 
-          second: '2-digit', 
-          timeZone: 'UTC' 
-        });
-        const el = document.getElementById('live-time');
-        if (el) el.textContent = formatted + ' UTC';
-      }
-      
-      // Format time for toast
-      function formatTime(date) {
-        return date.toLocaleTimeString('en-US', { 
-          hour12: false, 
-          hour: '2-digit', 
-          minute: '2-digit', 
-          second: '2-digit' 
-        });
-      }
-      
-      // Show toast notification
-      function showToast(message) {
-        toastTime.textContent = formatTime(new Date());
-        refreshToast.classList.add('show');
-        setTimeout(() => {
-          refreshToast.classList.remove('show');
-        }, 3000);
-      }
-      
-      // Update "last updated" text
-      function updateLastRefreshTime() {
-        if (lastUpdateTime) {
-          const secondsAgo = Math.floor((new Date() - lastRefreshTimestamp) / 1000);
-          if (secondsAgo < 60) {
-            lastUpdateTime.textContent = 'just now';
-          } else if (secondsAgo < 3600) {
-            lastUpdateTime.textContent = Math.floor(secondsAgo / 60) + 'm ago';
-          } else {
-            lastUpdateTime.textContent = Math.floor(secondsAgo / 3600) + 'h ago';
-          }
-        }
-      }
-      
-      // Format countdown display
-      function formatCountdown(seconds) {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-      }
-      
-      // Update countdown display and progress bar
-      function updateCountdown() {
-        if (remainingSeconds <= 0) {
-          performRefresh();
-          return;
-        }
-        
-        // Update countdown text
-        if (countdownText) {
-          countdownText.textContent = formatCountdown(remainingSeconds);
-        }
-        
-        // Update progress bar
-        if (countdownBar) {
-          const progress = ((REFRESH_INTERVAL - remainingSeconds) / REFRESH_INTERVAL) * 100;
-          countdownBar.style.width = progress + '%';
-        }
-        
-        // Update "last updated" every 30 seconds
-        if (remainingSeconds % 30 === 0) {
-          updateLastRefreshTime();
-        }
-        
-        remainingSeconds--;
-      }
-      
-      // Perform the actual refresh
-      function performRefresh() {
-        // Add refreshing class for animation
-        document.body.classList.add('refreshing');
-        
-        // Reset countdown
-        remainingSeconds = REFRESH_INTERVAL;
-        lastRefreshTimestamp = new Date();
-        
-        // Reset progress bar with animation
-        if (countdownBar) {
-          countdownBar.style.transition = 'none';
-          countdownBar.style.width = '0%';
-          setTimeout(() => {
-            countdownBar.style.transition = 'width 1s linear';
-          }, 50);
-        }
-        
-        // Show toast
-        showToast('Dashboard refreshed');
-        
-        // Update last refresh time
-        updateLastRefreshTime();
-        
-        // Reload the page
-        window.location.reload();
-      }
-      
-      // Manual refresh handler
-      window.manualRefresh = function() {
-        performRefresh();
-      };
-      
-      // Initialize countdown
-      function startCountdown() {
-        // Clear any existing interval
-        if (countdownInterval) {
-          clearInterval(countdownInterval);
-        }
-        
-        // Start new countdown
-        countdownInterval = setInterval(updateCountdown, 1000);
-        
-        // Initial update
-        updateCountdown();
-        updateLastRefreshTime();
-      }
-      
-      // Handle page visibility changes (pause countdown when tab is hidden)
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-          // Page hidden - could pause countdown, but we'll keep it running
-          // for accurate refresh timing
-        } else {
-          // Page visible again - update display
-          updateCountdown();
-        }
-      });
-      
-      // Keyboard shortcut for refresh (Ctrl+Shift+R)
-      document.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && e.shiftKey && e.key === 'R') {
-          e.preventDefault();
-          performRefresh();
-        }
-      });
-      
-      // Initialize everything
-      updateClock();
-      setInterval(updateClock, 1000);
-      startCountdown();
-      
-      // Log initialization
-      console.log('🚀 Waste-Dispo Intelligence Dashboard initialized');
-      console.log('⏱️  Auto-refresh interval:', REFRESH_INTERVAL, 'seconds');
-      console.log('🔄 Press Ctrl+Shift+R for manual refresh');
-      
-    })();
+    function updateClock() {
+      const now = new Date();
+      document.getElementById('live-time').textContent = now.toLocaleTimeString('en-US', { hour12: false, timeZone: 'UTC' }) + ' UTC';
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
   </script>
 </body>
 </html>
