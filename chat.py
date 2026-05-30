@@ -35,4 +35,4 @@ if __name__ == "__main__":
             else:
                 print(f"\n{master_name}: {master.process_input(user_in)}")
     finally:
-        master.session.cleanup(created_files=master.context.get("created_files"), purge_session=True)
+        master.cleanup()

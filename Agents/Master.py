@@ -4,6 +4,7 @@ import re
 import os
 import shutil
 import time
+import sqlite3
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor
 
@@ -39,8 +40,12 @@ _load_env_basic()
 
 class SessionManager:
     """Handles temporary data storage and session cleanup."""
-    def __init__(self, filename="session_state.json"):
-        self.filename = filename
+    def __init__(self, filename=None):
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        storage_dir = os.path.join(root, "Storage")
+        os.makedirs(storage_dir, exist_ok=True)
+        self.storage_dir = storage_dir
+        self.filename = filename or os.path.join(storage_dir, "session_state.json")
 
     def save(self, data):
         with open(self.filename, 'w', encoding='utf-8') as f:
@@ -89,6 +94,83 @@ class SessionManager:
 
         print("✅ Session closed.")
 
+
+class ChatMemoryStore:
+    """SQLite-backed chat memory for preserving recent conversation turns during a run."""
+    def __init__(self, db_path: Optional[str] = None):
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        storage_dir = os.path.join(root, "Storage")
+        os.makedirs(storage_dir, exist_ok=True)
+        self.storage_dir = storage_dir
+        self.db_path = db_path or os.path.join(storage_dir, "chat_memory.sqlite")
+        self._initialize()
+
+    def _connect(self):
+        return sqlite3.connect(self.db_path)
+
+    def _initialize(self):
+        connection = self._connect()
+        try:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def append_message(self, role: str, content):
+        if content is None:
+            return
+
+        text = str(content).strip()
+        if not text:
+            return
+
+        connection = self._connect()
+        try:
+            connection.execute(
+                "INSERT INTO chat_messages (role, content) VALUES (?, ?)",
+                (role, text),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def append_turn(self, user_text, assistant_text):
+        self.append_message("user", user_text)
+        self.append_message("assistant", assistant_text)
+
+    def recent_messages(self, limit: int = 12) -> List[Dict[str, str]]:
+        if limit <= 0 or not os.path.exists(self.db_path):
+            return []
+
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT role, content FROM chat_messages ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        finally:
+            connection.close()
+
+        return [{"role": role, "content": content} for role, content in reversed(rows)]
+
+    def cleanup(self):
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            path = self.db_path + suffix
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
+
 class WasteDispoMaster:
     ENV_CACHE_TTL_SECONDS = 60 * 60  # 1 hour
 
@@ -99,6 +181,7 @@ class WasteDispoMaster:
         self.lite_model = self.model_name  # kept only for backward compatibility; never used as a different model
         self.max_tokens = 16000  # Increased token limit for better responses
         self.session = SessionManager()
+        self.chat_memory = ChatMemoryStore()
         self.system_name = os.getenv("SUSTAINAI_SYSTEM_NAME", "SustainAi")
         self.master_name = os.getenv("SUSTAINAI_MASTER_NAME", "Lily")
 
@@ -133,6 +216,7 @@ class WasteDispoMaster:
             f"Auto-trigger agents the moment the user mentions environment, waste, pollution, soil, air quality, sustainability, or related requests.\n"
             f"Never ask for permission or say 'Would you like me to...?' or 'Shall I...?'. Execute and report results.\n"
             f"When the user asks for full information, reports, or analysis, run all core agents in one pass.\n"
+            f"When the user refers to earlier images, data, or location context, use stored session memory and answer from it instead of asking for the upload again.\n"
             f"IMPORTANT: Reuse cached environmental data for 1 hour when available; do not re-fetch unnecessarily.\n\n"
             f"--- CONTEXT ---\n"
             f"Current User Location: {self.context['location']}\n\n"
@@ -141,6 +225,80 @@ class WasteDispoMaster:
             f"Return a JSON list of actions: [ {{ 'intent': 'agent_name', 'parameters': {{ 'key': 'value' }} }} ]\n"
             f"If just chatting, respond as a world-class expert."
         )
+
+    def _build_memory_context(self) -> str:
+        kb = self.context.get("knowledge_base", {}) if isinstance(self.context, dict) else {}
+        parts = []
+
+        location = self.context.get("location")
+        if location:
+            parts.append(f"Location memory: {location}")
+
+        cache = kb.get("_cache", {}) if isinstance(kb, dict) else {}
+        env_cache = cache.get("env", {}) if isinstance(cache, dict) else {}
+        env_result = env_cache.get("result", {}) if isinstance(env_cache, dict) else {}
+        if isinstance(env_result, dict) and env_result:
+            env_bits = []
+            for key in ["temperature", "humidity", "wind_speed", "windspeed_openmeteo", "rain_1h", "precip_mm", "soil_moisture_0_to_7cm", "soil_moisture_7_to_28cm"]:
+                value = env_result.get(key)
+                if value is not None:
+                    env_bits.append(f"{key}={value}")
+            if env_bits:
+                parts.append("Latest environmental cache: " + "; ".join(env_bits[:8]))
+
+        recent_visuals = []
+        for key in ["image_analyses", "classifier_results"]:
+            items = kb.get(key) if isinstance(kb, dict) else None
+            if not isinstance(items, list) or not items:
+                continue
+            for item in items[-2:]:
+                if not isinstance(item, dict):
+                    continue
+                title = item.get("title") or os.path.basename(item.get("file_path", "")) or key
+                text = item.get("explanation") or item.get("result") or item.get("text")
+                if isinstance(text, dict):
+                    text = json.dumps(text, ensure_ascii=False)
+                if text:
+                    cleaned = str(text).replace("\n", " ").strip()
+                    recent_visuals.append(f"{title}: {cleaned[:1200]}")
+
+        if recent_visuals:
+            parts.append("Recent image memory:\n- " + "\n- ".join(recent_visuals))
+
+        suggested = self.context.get("last_suggested_actions") or []
+        if suggested:
+            parts.append(f"Last suggested actions: {json.dumps(suggested, ensure_ascii=False)}")
+
+        if not parts:
+            return ""
+
+        return "SESSION MEMORY:\n" + "\n\n".join(parts)
+
+    def _build_chat_messages(self, user_text: str) -> List[Dict[str, str]]:
+        messages = [{"role": "system", "content": self._get_system_prompt()}]
+        memory_context = self._build_memory_context()
+        if memory_context:
+            messages.append({"role": "system", "content": memory_context})
+        messages.extend(self.chat_memory.recent_messages(limit=12))
+        messages.append({"role": "user", "content": user_text})
+        return messages
+
+    def _stringify_response(self, response) -> str:
+        if isinstance(response, str):
+            return response
+        try:
+            return json.dumps(response, indent=2, ensure_ascii=False)
+        except Exception:
+            return str(response)
+
+    def _remember_turn(self, user_text: str, assistant_response) -> str:
+        response_text = self._stringify_response(assistant_response)
+        self.chat_memory.append_turn(user_text, response_text)
+        return response_text
+
+    def cleanup(self):
+        self.session.cleanup(created_files=self.context.get("created_files"), purge_session=True)
+        self.chat_memory.cleanup()
 
     def _now(self) -> int:
         return int(time.time())
@@ -1070,12 +1228,12 @@ class WasteDispoMaster:
                         lines.append(f"- {label} ({confidence:.2f})" if isinstance(confidence, (int, float)) else f"- {label}")
                     raw = "\n".join(lines)
                     # Let the summarizer produce a user-friendly message
-                    return self._summarize_for_user(raw, context="classification")
+                    return self._remember_turn(user_text, self._summarize_for_user(raw, context="classification"))
 
                 raw = f"Classification complete for {os.path.basename(image_path)}, but no detections were returned."
-                return self._summarize_for_user(raw, context="classification")
+                return self._remember_turn(user_text, self._summarize_for_user(raw, context="classification"))
 
-            return classification.get("error") if isinstance(classification, dict) and classification.get("error") else "Classification failed."
+            return self._remember_turn(user_text, classification.get("error") if isinstance(classification, dict) and classification.get("error") else "Classification failed.")
 
         # Direct image analysis path (demo/upload).
         if self._wants_image_analysis(user_text):
@@ -1117,32 +1275,32 @@ class WasteDispoMaster:
 
             # Summarize the image explanation for user-friendly chat output
             raw = f"Image analysis for {os.path.basename(image_path)}: {explanation}"
-            return self._summarize_for_user(raw, context="image_analysis")
+            return self._remember_turn(user_text, self._summarize_for_user(raw, context="image_analysis"))
 
         # Implicit consent: user confirms a previously suggested action.
         if self._is_affirmative_text(user_text) and self.context.get("last_suggested_actions"):
             actions = self.context.get("last_suggested_actions") or []
-            return self._run_actions(actions, user_text, force_full_actions=True)
+            return self._remember_turn(user_text, self._run_actions(actions, user_text, force_full_actions=True))
 
         # Zero-permission auto triggering.
         auto_actions = self._auto_actions_from_text(user_text)
         if auto_actions:
-            return self._run_actions(auto_actions, user_text, force_full_actions=True)
+            return self._remember_turn(user_text, self._run_actions(auto_actions, user_text, force_full_actions=True))
 
         if self._is_full_report_request(user_text):
-            return self._run_full_report_pipeline(user_text)
+            return self._remember_turn(user_text, self._run_full_report_pipeline(user_text))
 
         # 1. Decide Intent
         # Single-model policy: always use self.model_name.
         try:
             response = ollama.chat(
-            model=self.model_name,
-                messages=[{'role': 'system', 'content': self._get_system_prompt()}, {'role': 'user', 'content': user_text}]
+                model=self.model_name,
+                messages=self._build_chat_messages(user_text)
             )
         except Exception:
             response = ollama.chat(
                 model=self.model_name,
-                messages=[{'role': 'system', 'content': self._get_system_prompt()}, {'role': 'user', 'content': user_text}]
+                messages=self._build_chat_messages(user_text)
             )
         ai_content = response['message']['content']
 
@@ -1150,16 +1308,16 @@ class WasteDispoMaster:
             try:
                 json_str = re.search(r"\[.*\]", ai_content, re.DOTALL).group()
                 actions = json.loads(json_str)
-                return self._run_actions(actions, user_text, force_full_actions=self._is_full_report_request(user_text))
+                return self._remember_turn(user_text, self._run_actions(actions, user_text, force_full_actions=self._is_full_report_request(user_text)))
             except Exception as e:
                 print(f"⚙️ Orchestration Error: {e}")
-                return ai_content
+                return self._remember_turn(user_text, ai_content)
         
         suggested_actions = self._capture_suggested_actions(ai_content)
         if suggested_actions:
             self.context["last_suggested_actions"] = suggested_actions
             self.session.save(self.context)
-        return ai_content
+        return self._remember_turn(user_text, ai_content)
 
     def _grade_response_quality(self, response_text: str, data_completeness: float = 0.8) -> Dict:
         """

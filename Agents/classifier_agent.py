@@ -18,8 +18,8 @@ class ClassifierAgent:
         # Keep all model assets inside the waste-dispo repo.
         root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         default_paths = [
-            os.path.join(root, "weights", "best.onnx"),
             os.path.join(root, "weights", "best.pt"),
+            os.path.join(root, "weights", "best.onnx"),
             os.path.join(root, "weights", "last.pt"),
         ]
 

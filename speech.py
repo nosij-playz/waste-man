@@ -65,10 +65,7 @@ def main():
 
     finally:
         print("\n🧹 Cleaning session...")
-        master.session.cleanup(
-            created_files=master.context.get("created_files"),
-            purge_session=True
-        )
+        master.cleanup()
         print("Shutdown complete.")
 
 

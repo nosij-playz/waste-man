@@ -21,7 +21,10 @@ Thumbs.db
 .DS_Store
 
 # App runtime artifacts
-session_state.json
+Storage/session_state.json
+Storage/chat_memory.sqlite
+Storage/chat_memory.sqlite-wal
+Storage/chat_memory.sqlite-shm
 interface/dashboard.html
 display/*.png
 
